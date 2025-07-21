@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const puppeteer = require('puppeteer');
 
 const app = express();
 app.use(express.json());
@@ -31,7 +32,6 @@ app.post('/scrape-email', async (req, res) => {
         const text = $('body').text();
         const emailsFromText = extractEmails(text);
 
-        // 👇 Nuevo: revisa href="mailto:…"
         const emailsFromMailto = [];
         $('a[href^="mailto:"]').each((_, el) => {
             const href = $(el).attr('href');
@@ -39,10 +39,23 @@ app.post('/scrape-email', async (req, res) => {
             if (email) emailsFromMailto.push(email);
         });
 
-        const allEmails = Array.from(new Set([
+        let allEmails = Array.from(new Set([
             ...emailsFromText,
             ...emailsFromMailto
         ]));
+
+        // 👉 Si no encontró ningún email, intenta en Facebook
+        if (allEmails.length === 0) {
+            console.log('🔍 No email on site. Checking Facebook link...');
+            const fbLink = findFacebookLink($);
+            if (fbLink) {
+                console.log(`🔗 Found Facebook link: ${fbLink}`);
+                const fbEmail = await scrapeFacebook(fbLink);
+                if (fbEmail) {
+                    allEmails.push(fbEmail);
+                }
+            }
+        }
 
         console.log(`📧 Found emails: ${allEmails}`);
 
@@ -68,6 +81,40 @@ function extractEmails(text) {
     return matches ? Array.from(new Set(matches)) : [];
 }
 
+function findFacebookLink($) {
+    let fbLink = null;
+    $('a[href*="facebook.com"]').each((_, el) => {
+        const href = $(el).attr('href');
+        if (href && href.includes('facebook.com')) {
+            fbLink = href.split('?')[0]; // limpia parámetros extra
+            return false; // rompe el loop
+        }
+    });
+    return fbLink;
+}
+
+async function scrapeFacebook(fbUrl) {
+    console.log(`🧭 Scraping Facebook page: ${fbUrl}`);
+    const browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+        await page.goto(fbUrl, { waitUntil: 'networkidle2', timeout: 20000 });
+        const text = await page.evaluate(() => document.body.innerText);
+        const emails = extractEmails(text);
+        await browser.close();
+        if (emails.length > 0) {
+            console.log(`📧 Found email on Facebook: ${emails[0]}`);
+            return emails[0];
+        }
+        console.log('🔍 No email found on Facebook.');
+        return null;
+    } catch (err) {
+        console.error(`❌ Error scraping Facebook: ${err.message}`);
+        await browser.close();
+        return null;
+    }
+}
+
 app.listen(PORT, () => {
-    console.log(`✅ Email scraper listening on port ${PORT}`);
+    console.log(`✅ Email scraper with FB fallback listening on port ${PORT}`);
 });
