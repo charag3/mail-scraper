@@ -95,7 +95,10 @@ function findFacebookLink($) {
 
 async function scrapeFacebook(fbUrl) {
     console.log(`🧭 Scraping Facebook page: ${fbUrl}`);
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await puppeteer.launch({ 
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
     const page = await browser.newPage();
     try {
         await page.goto(fbUrl, { waitUntil: 'networkidle2', timeout: 20000 });
